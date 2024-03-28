@@ -1,6 +1,6 @@
 # Acrobot - The Magic 90's Word Game Reviver
 Acrobot is an open source recreation of the Registration Server and IRC bot used in the 1997-2001 Berkeley Systems version of [Acrophobia](https://en.wikipedia.org/wiki/Acrophobia_(game)).
-<br>Please note that this is HEAVILY in WIP territory. Use at your own risk.
+Please note that this is HEAVILY in WIP territory. Use at your own risk.
 
 ## Progress
 ### What currently works:
