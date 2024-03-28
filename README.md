@@ -17,6 +17,7 @@ Please note that this is HEAVILY in WIP territory. Use at your own risk.
 1. [Install Python](https://www.python.org/downloads/)
 2. Download (and/or clone) the code
 3. Run `__main__.py`
-4. Get a copy of Acrophobia somewhere
-5. Modify the game to direct it to your new server (tutorial for that coming soon)
-6. Enjoy
+4. Run an IRC server ([InspIRCd](https://www.inspircd.org/) is recommended)
+5. Get a copy of Acrophobia somewhere
+6. Modify the game to direct it to your new server (tutorial for that coming soon)
+7. Enjoy
