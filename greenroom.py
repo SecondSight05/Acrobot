@@ -30,6 +30,7 @@ class greenroom():
         while True:
             ServerConnection, ServerConnAddr = GRSock.accept()
             msg = ServerConnection.recv(2048)
+            # Uncomment the line below to see web requests when they come in.
             #print('greenroom request: ' + str(msg))
             if msg[5:21] == b'/cgi/acrval0.cgi':
                 # Login (Validation)

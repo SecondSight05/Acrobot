@@ -27,8 +27,9 @@ dbcursor = database.cursor()
 dbcursor.execute('CREATE TABLE IF NOT EXISTS accounts (Username TEXT, Password TEXT, Adult INTEGER, BadName INTEGER, BanStatus INTEGER)')
 dbcursor.execute('CREATE TABLE IF NOT EXISTS rooms (RoomName TEXT, ChannelName TEXT, IsClean INTEGER, SpecialInterest INTEGER)')
 # TBD: room creation: since you have to create rooms manually right now, just make two rooms here - one in each category
-dbcursor.execute('INSERT INTO rooms VALUES ("Acro Central", "Acro_AcroCentral", 1, 0)')
-dbcursor.execute('INSERT INTO rooms VALUES ("After Dark", "Acro_AfterDark", 0, 0)')
+# update: disabled these cause they were causing problems - wait for proper room creation
+#dbcursor.execute('INSERT INTO rooms VALUES ("Acro Central", "Acro_AcroCentral", 1, 0)')
+#dbcursor.execute('INSERT INTO rooms VALUES ("After Dark", "Acro_AfterDark", 0, 0)')
 database.commit()
 if os.path.isfile('data/config.ini') == False:
     ConfigFile = ConfigParser()
