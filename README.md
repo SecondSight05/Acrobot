@@ -4,11 +4,11 @@ Please note that this is HEAVILY in WIP territory. Use at your own risk.
 
 ## Progress
 ### What currently works:
-- Account Logon
-- Account Registration
+- Account Logon/Registration
 - Bad Name Changing
 - The Game Room List
-- Basic entry into game rooms
+- Entry/Exit to/from game rooms
+- Find My Friends
 
 ### What currently doesn't work:
 - Everything else
