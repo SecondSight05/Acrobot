@@ -81,7 +81,8 @@ class IRCClient():
                 if msg.find('Acrobot'.encode()) == -1:
                     JoinMessage = msg.decode('UTF-8')
                     JoinMessage = JoinMessage.split(':')
-                    JoinIRCName = JoinMessage[1][0:12]
+                    JoinIRCName = JoinMessage[1].split('!')
+                    JoinIRCName = JoinIRCName[0]
                     JoinChannel = JoinMessage[2][:-2]
                     IRCSock.send('PRIVMSG {} :logon_now\r\n'.format(JoinIRCName).encode())
             
@@ -128,7 +129,9 @@ class IRCClient():
             
             # Set the player up for starting the actual game.
             elif msg.find('start_play'.encode()) != -1:
-                StartPlayIRCName = msg[1:13].decode('UTF-8')
+                StartPlayIRCName = msg[1:25].decode('UTF-8')
+                StartPlayIRCName = StartPlayIRCName.split('!')
+                StartPlayIRCName = StartPlayIRCName[0]
                 # TBD: actually get the current state of the room
                 IRCSock.send('PRIVMSG {} :current_state start_game\r\n'.format(StartPlayIRCName).encode())
                 # Get the room name/data from the DB and the player's username from RoomState.
@@ -175,7 +178,9 @@ class IRCClient():
             
             # Logoff - Remove player from room.
             elif msg.find('logoff ip'.encode()) != -1 or msg.find('QUIT'.encode()) != -1:
-                LogoffIRCName = msg[1:13].decode('UTF-8')
+                LogoffIRCName = msg[1:25].decode('UTF-8')
+                LogoffIRCName = LogoffIRCName.split('!')
+                LogoffIRCName = LogoffIRCName[0]
                 if RoomState['playerloc'][LogoffIRCName].find('Acro_List') == -1:
                     # Get the channel that the player is in.
                     LogoffChannel = RoomState['playerloc'][LogoffIRCName]
@@ -187,6 +192,7 @@ class IRCClient():
                                 loitem = loitem.split(',')
                                 LogoffScore = loitem[1]
                                 LogoffUsername = loitem[2]
+                                IRCLog.info('Username ' + LogoffUsername + ' logged off of the ' + LogoffChannel + ' room')
                     # Get the index for the player's info in RoomState.
                     LogoffIndex = logoffinfo.index(LogoffIRCName + ',' + LogoffScore + ',' + LogoffUsername)
                     # Remove the player from the room in RoomState.
@@ -199,7 +205,9 @@ class IRCClient():
             
             # Find My Friends
             elif msg.find('command find_player'.encode()) != -1:
-                FMFIRCName = msg[1:13].decode('UTF-8')
+                FMFIRCName = msg[1:25].decode('UTF-8')
+                FMFIRCName = FMFIRCName.split('!')
+                FMFIRCName = FMFIRCName[0]
                 FMFUsername = msg.decode('UTF-8').split('"')
                 FMFUsername = FMFUsername[1]
                 # Check if the requested player is in the DB.
