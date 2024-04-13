@@ -256,6 +256,15 @@ class IRCClient():
                             RoomMode = RoomState[FMFChannel]['roommode']
                             FMFRoomList = '0'
                         IRCSock.send(f'PRIVMSG {FMFIRCName} :player_found "{FMFUsername}" "{fmfroomname}" 0 "{IRCLocation}" {IRCPort} 0 "{FMFChannel}" 0 "Acrobot" {fmfisclean} "{RoomMode}" {RoomPlayerCount} {RoomHighScore} {FMFRoomList}\r\n'.encode())
+            
+            # When someone registers a new account, add the fact that they're not online yet to RoomState.
+            elif msg.find('newreg'.encode()) != -1:
+                newreg = msg.decode('UTF-8')
+                newreg = newreg.split(' ')
+                newreg = newreg[4].split('\r\n')
+                newreg = newreg[0]
+                RoomState['playeronline'][newreg] = '0'
+                IRCSock.send('PRIVMSG NPLink :npdone\r\n'.encode())
 
 class Acrophobia():
     def logon(LogonUsername, LogonPassword, encryption):
