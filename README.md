@@ -9,9 +9,12 @@ Please note that this is HEAVILY in WIP territory. Use at your own risk.
 - The Game Room List
 - Entry/Exit to/from game rooms
 - Find My Friends
+- Practice Mode
 
 ### What currently doesn't work:
-- Everything else
+- Problem Player Submission
+- Play Mode
+- Everything else after that
 
 ## How to setup
 1. [Install Python](https://www.python.org/downloads/)
