@@ -1,6 +1,6 @@
 from configparser import ConfigParser
 from cryptography.fernet import Fernet
-import socket, logging, sqlite3, random
+import socket, logging, sqlite3, random, threading, string, time
 
 class IRCClient():
     def start():
@@ -19,6 +19,10 @@ class IRCClient():
         RoomState['playername'] = {}
         RoomState['playerfmf'] = {}
         RoomState['playeronline'] = {}
+        RoomState['playerinroom'] = {}
+        RoomStateSync = ConfigParser()
+        RoomStateSync.read('data/roomstate_sync.ini')
+        RoomStateSync['comptime'] = {}
         
         # Setup the Find My Friends RoomState key for each player
         database = sqlite3.connect('data/bezerk.db')
@@ -35,6 +39,12 @@ class IRCClient():
             RoomState[room[1]]['roomhighscore'] = '0'
             RoomState[room[1]]['roommode'] = ''
             RoomState[room[1]]['roomplayerinfo'] = ''
+            RoomStateSync[room[1]] = {}
+            RoomStateSync[room[1]]['roomgametype'] = '0'
+            RoomStateSync[room[1]]['companswercount'] = '0'
+            RoomStateSync[room[1]]['companswers'] = ''
+            RoomStateSync[room[1]]['category'] = ''
+            RoomStateSync[room[1]]['roomcurrentstate'] = 'start_game'
         dbcursor.close()
         database.close()
         
@@ -100,6 +110,7 @@ class IRCClient():
                     RoomState['playername'][LogonIRCName] = LogonMessage[1]
                     RoomState['playerfmf'][LogonMessage[1]] = LogonIRCName
                     RoomState['playeronline'][LogonMessage[1]] = '1'
+                    RoomState['playerinroom'][LogonIRCName] = '0'
                     # Check if the player is in the room list channel. If they aren't, send sponsor_ad to them privately.
                     if LogonChannel != '#Acro_List':
                         IRCLog.info('Username ' + LogonMessage[1] + ' logged on to the ' + LogonChannel + ' room')
@@ -118,7 +129,7 @@ class IRCClient():
                         IRCSock.send('PRIVMSG {} :start_list bot\r\n'.format(LogonIRCName).encode())
                         dbcursor.execute('SELECT * FROM rooms')
                         for room in dbcursor:
-                            # TBD: properly add the high score counter and the mode
+                            # TBD: properly add the high score counter
                             RoomPlayerCount = int(RoomState[room[1]]['roomplayercount'])
                             RoomHighScore = int(RoomState[room[1]]['roomhighscore'])
                             RoomMode = RoomState[room[1]]['roommode']
@@ -132,10 +143,11 @@ class IRCClient():
                 StartPlayIRCName = msg[1:25].decode('UTF-8')
                 StartPlayIRCName = StartPlayIRCName.split('!')
                 StartPlayIRCName = StartPlayIRCName[0]
-                # TBD: actually get the current state of the room
-                IRCSock.send('PRIVMSG {} :current_state start_game\r\n'.format(StartPlayIRCName).encode())
-                # Get the room name/data from the DB and the player's username from RoomState.
+                # Get the room's name and current state.
                 StartPlayChannel = RoomState['playerloc'][StartPlayIRCName]
+                StartPlayRoomState = RoomStateSync[StartPlayChannel]['roomcurrentstate']
+                IRCSock.send('PRIVMSG {} :current_state {}\r\n'.format(StartPlayIRCName, StartPlayRoomState).encode())
+                # Get the room name/data from the DB and the player's username from RoomState.
                 database = sqlite3.connect('data/bezerk.db')
                 dbcursor = database.cursor()
                 dbcursor.execute('SELECT RoomName FROM rooms WHERE ChannelName = ?', (StartPlayChannel,))
@@ -152,11 +164,8 @@ class IRCClient():
                 IRCSock.send('PRIVMSG #{} :player add "{}" 0 "{}"\r\n'.format(StartPlayChannel, StartPlayIRCName, StartPlayUsername).encode())
                 # Check if there isn't anyone else in the room.
                 RoomPlayerCount = int(RoomState[StartPlayChannel]['roomplayercount'])
-                if RoomPlayerCount == 0:
-                    # If true, then immediately set the player into practice mode. (TBD)
-                    print('practice mode stuff here!')
-                else:
-                    # Otherwise, send the info for the other players to the new player privately.
+                if RoomPlayerCount > 0:
+                    # If false, send the info for the other players to the new player privately.
                     listplayeradd = 1
                     listplayerinfo = RoomState[StartPlayChannel]['roomplayerinfo'].split('/')
                     while listplayeradd <= RoomPlayerCount:
@@ -171,6 +180,26 @@ class IRCClient():
                 RoomHighScore = int(RoomState[StartPlayChannel]['roomhighscore'])
                 RoomMode = RoomState[StartPlayChannel]['roommode']
                 RoomState[StartPlayChannel]['roomplayerinfo'] = RoomState[StartPlayChannel]['roomplayerinfo'] + '/' +  StartPlayIRCName + ',0,' + StartPlayUsername
+                RoomState['playerinroom'][StartPlayIRCName] = '1'
+                # Set the game type (Play or Practice) if that game type isn't already running, and a certain amount of players are in the room.
+                if RoomStateSync[StartPlayChannel]['roomgametype'] == '0':
+                    # Practice Mode
+                    if RoomState[StartPlayChannel]['roomplayercount'] == '1' or RoomState[StartPlayChannel]['roomplayercount'] == '2':
+                        RoomState[StartPlayChannel]['roommode'] = 'Practice'
+                        RoomStateSync[StartPlayChannel]['roomgametype'] = '2'
+                        with open('data/roomstate_sync.ini', 'w') as rssync:
+                            RoomStateSync.write(rssync)
+                        IRCSock.send('PRIVMSG {} :chat "There must be at least 3 players to start a game - You will be in Practice mode until then."\r\n'.format(StartPlayIRCName).encode())
+                        threading.Thread(target=GameLoop.practice, args=(IRCSock, RoomStateSync, StartPlayChannel)).start()
+                elif RoomStateSync[StartPlayChannel]['roomgametype'] == '2':
+                    # Play Mode
+                    if int(RoomState[StartPlayChannel]['roomplayercount']) >= 3:
+                        RoomState[StartPlayChannel]['roommode'] = 'Play'
+                        RoomStateSync[StartPlayChannel]['roomgametype'] = '1'
+                        with open('data/roomstate_sync.ini', 'w') as rssync:
+                            RoomStateSync.write(rssync)
+                        IRCSock.send('PRIVMSG #{} :chat "A third player has joined - Get ready to play!"\r\n'.format(StartPlayChannel).encode())
+                        threading.Thread(target=GameLoop.play, args=(IRCSock, RoomStateSync, StartPlayChannel)).start()
                 # Update the room in the list to show a new player.
                 IRCSock.send('PRIVMSG #Acro_List :start_list bot\r\n'.encode())
                 IRCSock.send(f'PRIVMSG #Acro_List :list_item bot 0 "{dbresults[0]}" 0 "{IRCLocation}" {IRCPort} 0 "{dbresults[1]}" 0 "Acrobot" {dbresults[2]} "{RoomMode}" {str(RoomPlayerCount)} {str(RoomHighScore)} 0 {dbresults[3]}\r\n'.encode())
@@ -181,18 +210,18 @@ class IRCClient():
                 LogoffIRCName = msg[1:25].decode('UTF-8')
                 LogoffIRCName = LogoffIRCName.split('!')
                 LogoffIRCName = LogoffIRCName[0]
-                if RoomState['playerloc'][LogoffIRCName].find('Acro_List') == -1:
+                if RoomState['playerloc'][LogoffIRCName].find('Acro_List') == -1 and RoomState['playerinroom'][LogoffIRCName] == '1':
                     # Get the channel that the player is in.
                     LogoffChannel = RoomState['playerloc'][LogoffIRCName]
                     # Find the other two pieces of info from RoomState.
-                    logoffinfo = RoomState[StartPlayChannel]['roomplayerinfo'].split('/')
+                    logoffinfo = RoomState[LogoffChannel]['roomplayerinfo'].split('/')
                     for loitem in logoffinfo:
                         if loitem != '':
                             if loitem.find(LogoffIRCName) != -1:
                                 loitem = loitem.split(',')
                                 LogoffScore = loitem[1]
                                 LogoffUsername = loitem[2]
-                                IRCLog.info('Username ' + LogoffUsername + ' logged off of the ' + LogoffChannel + ' room')
+                                IRCLog.info('Username ' + LogoffUsername + ' logged off of the #' + LogoffChannel + ' room')
                     # Get the index for the player's info in RoomState.
                     LogoffIndex = logoffinfo.index(LogoffIRCName + ',' + LogoffScore + ',' + LogoffUsername)
                     # Remove the player from the room in RoomState.
@@ -200,8 +229,17 @@ class IRCClient():
                     logoffinfo = '/'.join(logoffinfo)
                     RoomState[LogoffChannel]['roomplayercount'] = str(int(RoomState[LogoffChannel]['roomplayercount']) - 1)
                     RoomState['playeronline'][LogoffUsername] = '0'
+                    RoomState['playerinroom'][LogoffIRCName] = '0'
                     # Update the in-game player list.
                     IRCSock.send('PRIVMSG #{} :player remove "{}" {} "{}"\r\n'.format(LogoffChannel, LogoffIRCName, LogoffScore, LogoffUsername).encode())
+                    # Check if the room's game type needs to be changed.
+                    if RoomStateSync[LogoffChannel]['roomgametype'] == '2':
+                        if int(RoomState[LogoffChannel]['roomplayercount']) == 0:
+                            # If there are no players left, close the loop for that room.
+                            RoomStateSync[LogoffChannel]['roomgametype'] = '0'
+                            RoomState[LogoffChannel]['roommode'] = ''
+                            with open('data/roomstate_sync.ini', 'w') as rssync:
+                                RoomStateSync.write(rssync)
             
             # Find My Friends
             elif msg.find('command find_player'.encode()) != -1:
@@ -265,6 +303,96 @@ class IRCClient():
                 newreg = newreg[0]
                 RoomState['playeronline'][newreg] = '0'
                 IRCSock.send('PRIVMSG NPLink :npdone\r\n'.encode())
+            
+            # When an acro is sent during the composition round.
+            elif msg.find('response answer'.encode()) != -1:
+                RAAcro = msg.decode('UTF-8')
+                RAAcro = RAAcro.split('"')
+                RATime = RAAcro[0].split(' ')
+                RAAcro = RAAcro[1]
+                RAPlayer = RATime[6]
+                RATime = RATime[5]
+                rsch = RoomState['playerloc'][RAPlayer]
+                RoomStateSync[rsch]['companswers'] = RoomStateSync[rsch]['companswers'] + '/' + RoomStateSync[rsch]['companswercount'] + ',' + RAPlayer + ',' + RAAcro
+                RoomStateSync[rsch]['companswercount'] = str(int(RoomStateSync[rsch]['companswercount']) + 1)
+                RoomStateSync['comptime'][RAPlayer] = str(RATime)
+                with open('data/roomstate_sync.ini', 'w') as rssync:
+                    RoomStateSync.write(rssync)
+                IRCSock.send('PRIVMSG #{} :answer_received {}\r\n'.format(rsch, RoomStateSync[rsch]['companswercount']).encode())
+            
+            # TBD: voting responses
+            elif msg.find('response vote'.encode()) != -1:
+                print('voting round TBD')
+            
+            # When a category is selected by the winning player.
+            elif msg.find('response category'.encode()) != -1:
+                RCCategory = msg.decode('UTF-8')
+                RCCategory = RCCategory.split(' ')
+                RCPlayer = RCCategory[0].split('!')
+                RCCategory = RCCategory[5]
+                RCPlayer = RCPlayer[0].split(':')
+                RCPlayer = RCPlayer[1]
+                RoomStateSync[RoomState['playerloc'][RCPlayer]]['category'] = RCCategory
+                with open('data/roomstate_sync.ini', 'w') as rssync:
+                    RoomStateSync.write(rssync)
+
+class GameLoop():
+    def practice(IRCSock, RoomStateSync, GLChannel):
+        AcroLetters = 3
+        AcroCategory = 'General Acrophobia'
+        PracticeLoop = True
+        PracticeLoop = GameLoop.loopcheck_pr(GLChannel, RoomStateSync)
+        time.sleep(4)
+        while PracticeLoop is True:
+            # Composition Round (Practice)
+            IRCSock.send('PRIVMSG #{} :start_comp_round 2500 60000 1 "{}" "{}"\r\n'.format(GLChannel, Acrophobia.generateacro(AcroLetters), AcroCategory).encode())
+            PracticeLoop = GameLoop.loopcheck_pr(GLChannel, RoomStateSync)
+            time.sleep(78)
+            # If there wasn't any composition round submissions, skip the category picker round.
+            if int(RoomStateSync[GLChannel]['companswercount']) > 0:
+                # In Practice Mode, the first person to submit an acro chooses the category.
+                CategoryChooser = RoomStateSync[GLChannel]['companswers'].split(',')
+                CategoryChooser = CategoryChooser[1]
+                # Category Picker Round (Practice)
+                IRCSock.send('PRIVMSG #{} :start_categories 2500 5000 1 "{}"\r\n'.format(GLChannel, CategoryChooser).encode())
+                PracticeLoop = GameLoop.loopcheck_pr(GLChannel, RoomStateSync)
+                # Get the categories and show them to the player.
+                CategoryList = Acrophobia.getcategories()
+                IRCSock.send('PRIVMSG #{} :start_list category\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :list_item category 0 "{}"\r\n'.format(GLChannel, CategoryList[0]).encode())
+                IRCSock.send('PRIVMSG #{} :list_item category 1 "{}"\r\n'.format(GLChannel, CategoryList[1]).encode())
+                IRCSock.send('PRIVMSG #{} :list_item category 2 "{}"\r\n'.format(GLChannel, CategoryList[2]).encode())
+                IRCSock.send('PRIVMSG #{} :list_item category 3 "General Acrophobia"\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :end_list category\r\n'.format(GLChannel).encode())
+                PracticeLoop = GameLoop.loopcheck_pr(GLChannel, RoomStateSync)
+                time.sleep(10)
+                # If the bottom category or no category is chosen, set the next category to General Acrophobia.
+                if RoomStateSync[GLChannel]['category'] == '' or RoomStateSync[GLChannel]['category'] == '3':
+                    AcroCategory = 'General Acrophobia'
+                # Otherwise, set the category to the one that was chosen.
+                else:
+                    AcroCategory = CategoryList[int(RoomStateSync[GLChannel]['category'])]
+            # Increase the amount of letters in the next acronym by one. If it's over 7, set it back to 3.
+            AcroLetters += 1
+            if AcroLetters > 7:
+                AcroLetters = 3
+            # Empty out the composition round answers.
+            RoomStateSync[GLChannel]['companswers'] = ''
+            RoomStateSync[GLChannel]['companswercount'] = '0'
+            RoomStateSync[GLChannel]['category'] = ''
+            with open('data/roomstate_sync.ini', 'w') as rssync:
+                RoomStateSync.write(rssync)
+            PracticeLoop = GameLoop.loopcheck_pr(GLChannel, RoomStateSync)
+    
+    def play(IRCSock, RoomStateSync, GLChannel):
+        # TBD: the rest of this
+        IRCSock.send('PRIVMSG #{} :start_game 8250\r\n'.format(GLChannel).encode())
+    
+    def loopcheck_pr(channel, RoomStateSync):
+        if RoomStateSync[channel]['roomgametype'] == '0' or RoomStateSync[channel]['roomgametype'] == '1':
+            return False
+        else:
+            return True
 
 class Acrophobia():
     def logon(LogonUsername, LogonPassword, encryption):
@@ -302,3 +430,34 @@ class Acrophobia():
                     # If it isn't, then the account is good to finish logon. Return 1.
                     else:
                         return 1
+    
+    # Generate a random acronym.
+    def generateacro(letters):
+        lettercount = 0
+        letterselect = ''
+        while lettercount < letters:
+            randletter = random.choice(string.ascii_uppercase)
+            # If the selected letter is X or Z, there's a much lower chance of it actually being added.
+            if randletter == 'X' or randletter == 'Z':
+                if random.randint(0, 100) < 11:
+                    addletter = 1
+                else:
+                    addletter = 0
+            # For any other letter, just immediately add it.
+            else:
+                addletter = 1
+            if addletter == 1:
+                letterselect = letterselect + randletter
+                lettercount += 1
+        return letterselect
+    
+    # Get three random categories.
+    def getcategories():
+        database = sqlite3.connect('data/bezerk.db')
+        dbcursor = database.cursor()
+        dbcursor.execute('SELECT * FROM categories ORDER BY RANDOM() LIMIT 3')
+        dbresults = dbcursor.fetchall()
+        dbcursor.close()
+        database.close()
+        CategoryList = [dbresults[0][0], dbresults[1][0], dbresults[2][0]]
+        return CategoryList
