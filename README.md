@@ -9,10 +9,10 @@ Please note that this is HEAVILY in WIP territory. Use at your own risk.
 - The Game Room List
 - Entry/Exit to/from game rooms
 - Find My Friends
+- Problem Player Complaints
 - Practice Mode
 
 ### What currently doesn't work:
-- Problem Player Submission
 - Play Mode
 - Everything else after that
 
