@@ -67,7 +67,7 @@ class IRCClient():
         while True:
             msg = IRCSock.recv(2048)
             # Uncomment the line below to see IRC messages when they come in.
-            #IRCLog.info('New message: ' + str(msg))
+            IRCLog.info('New message: ' + str(msg))
             # Let's play Ping-Pong!
             if msg.find('PING'.encode()) != -1:
                 IRCSock.send("PONG :don't worry, i'm still here\r\n".encode())
@@ -322,6 +322,7 @@ class IRCClient():
             
             # TBD: voting responses
             elif msg.find('response vote'.encode()) != -1:
+                # NOTE: if there's two ' next to each other, that's a ". change it to that.
                 print('voting round TBD')
             
             # When a category is selected by the winning player.
@@ -335,18 +336,46 @@ class IRCClient():
                 RoomStateSync[RoomState['playerloc'][RCPlayer]]['category'] = RCCategory
                 with open('data/roomstate_sync.ini', 'w') as rssync:
                     RoomStateSync.write(rssync)
+            
+            # Problem Player Complaints
+            # TBD: QUOTES ARENT REMOVED (thankfully this doesn't effect acros)
+            # TBD: figure out how to kick people out with enough complaints - it can't just be a certain amount, it could be abused
+            elif msg.find('complain'.encode()) != -1:
+                ComplainPlayer = msg.decode('UTF-8')
+                ComplainPlayer = ComplainPlayer.split('"')
+                ComplainType = ComplainPlayer[0].split(' ')
+                ComplainReason = ComplainPlayer[3]
+                ComplainPlayer = ComplainPlayer[1]
+                ComplainIRCName = ComplainType[0].split('!')
+                ComplainType = int(ComplainType[5])
+                ComplainIRCName = ComplainIRCName[0].split(':')
+                ComplainIRCName = ComplainIRCName[1]
+                ComplainTime = time.time()
+                ComplainTimeDoc = time.strftime("%a, %d %b %Y %H:%M:%S", time.gmtime(ComplainTime))
+                ComplainTime = time.strftime("%a-%d%b%Y-%H'%M'%S", time.gmtime(ComplainTime))
+                if ComplainType == 1:
+                    ComplainType = 'Bad Language'
+                elif ComplainType == 2:
+                    ComplainType = 'Harassment'
+                else:
+                    ComplainType = 'Other'
+                ComplainReport = f'Player Game Name: {ComplainPlayer}\nPlayer IRC Name: {ComplainIRCName}\nReport Type: {ComplainType}\nReport Reason: {ComplainReason}\nReport Time: {ComplainTimeDoc}'
+                ComplainFile = open('data/report-' + ComplainTime + '.txt', 'w')
+                ComplainFile.write(ComplainReport)
+                ComplainFile.close()
+                IRCSock.send('PRIVMSG {} :chat "Thank you! Your complaint has been sent.\r\n"'.format(ComplainIRCName).encode())
 
 class GameLoop():
     def practice(IRCSock, RoomStateSync, GLChannel):
         AcroLetters = 3
         AcroCategory = 'General Acrophobia'
         PracticeLoop = True
-        PracticeLoop = GameLoop.loopcheck_pr(GLChannel, RoomStateSync)
+        PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
         time.sleep(4)
         while PracticeLoop is True:
             # Composition Round (Practice)
             IRCSock.send('PRIVMSG #{} :start_comp_round 2500 60000 1 "{}" "{}"\r\n'.format(GLChannel, Acrophobia.generateacro(AcroLetters), AcroCategory).encode())
-            PracticeLoop = GameLoop.loopcheck_pr(GLChannel, RoomStateSync)
+            PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
             time.sleep(78)
             # If there wasn't any composition round submissions, skip the category picker round.
             if int(RoomStateSync[GLChannel]['companswercount']) > 0:
@@ -355,7 +384,7 @@ class GameLoop():
                 CategoryChooser = CategoryChooser[1]
                 # Category Picker Round (Practice)
                 IRCSock.send('PRIVMSG #{} :start_categories 2500 5000 1 "{}"\r\n'.format(GLChannel, CategoryChooser).encode())
-                PracticeLoop = GameLoop.loopcheck_pr(GLChannel, RoomStateSync)
+                PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
                 # Get the categories and show them to the player.
                 CategoryList = Acrophobia.getcategories()
                 IRCSock.send('PRIVMSG #{} :start_list category\r\n'.format(GLChannel).encode())
@@ -364,7 +393,7 @@ class GameLoop():
                 IRCSock.send('PRIVMSG #{} :list_item category 2 "{}"\r\n'.format(GLChannel, CategoryList[2]).encode())
                 IRCSock.send('PRIVMSG #{} :list_item category 3 "General Acrophobia"\r\n'.format(GLChannel).encode())
                 IRCSock.send('PRIVMSG #{} :end_list category\r\n'.format(GLChannel).encode())
-                PracticeLoop = GameLoop.loopcheck_pr(GLChannel, RoomStateSync)
+                PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
                 time.sleep(10)
                 # If the bottom category or no category is chosen, set the next category to General Acrophobia.
                 if RoomStateSync[GLChannel]['category'] == '' or RoomStateSync[GLChannel]['category'] == '3':
@@ -382,17 +411,34 @@ class GameLoop():
             RoomStateSync[GLChannel]['category'] = ''
             with open('data/roomstate_sync.ini', 'w') as rssync:
                 RoomStateSync.write(rssync)
-            PracticeLoop = GameLoop.loopcheck_pr(GLChannel, RoomStateSync)
+            PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
     
     def play(IRCSock, RoomStateSync, GLChannel):
-        # TBD: the rest of this
+        AcroLetters = 3
+        AcroCategory = 'General Acrophobia'
+        AcroRound = 1
+        PlayLoop = True
+        PlayLoop = GameLoop.loopcheck(GLChannel, 1, RoomStateSync)
         IRCSock.send('PRIVMSG #{} :start_game 8250\r\n'.format(GLChannel).encode())
+        time.sleep(10)
+        while PlayLoop is True:
+            # Composition Round
+            IRCSock.send('PRIVMSG #{} :start_comp_round 2500 60000 {} "{}" "{}"\r\n'.format(GLChannel, str(AcroRound), Acrophobia.generateacro(AcroLetters), AcroCategory).encode())
+            PlayLoop = GameLoop.loopcheck(GLChannel, 1, RoomStateSync)
+            time.sleep(78)
+            # hi again, make sure that someone actually submitted an acro before continuing
     
-    def loopcheck_pr(channel, RoomStateSync):
-        if RoomStateSync[channel]['roomgametype'] == '0' or RoomStateSync[channel]['roomgametype'] == '1':
-            return False
-        else:
-            return True
+    def loopcheck(channel, isplaymode, RoomStateSync):
+        if isplaymode == 0:
+            if RoomStateSync[channel]['roomgametype'] == '0' or RoomStateSync[channel]['roomgametype'] == '1':
+                return False
+            else:
+                return True
+        elif isplaymode == 1:
+            if RoomStateSync[channel]['roomgametype'] == '0' or RoomStateSync[channel]['roomgametype'] == '2':
+                return False
+            else:
+                return True
 
 class Acrophobia():
     def logon(LogonUsername, LogonPassword, encryption):
