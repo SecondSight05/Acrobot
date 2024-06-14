@@ -18,18 +18,22 @@ class IRCClient():
         RoomState['playerloc'] = {}
         RoomState['playername'] = {}
         RoomState['playerfmf'] = {}
-        RoomState['playeronline'] = {}
         RoomState['playerinroom'] = {}
         RoomStateSync = ConfigParser()
         RoomStateSync.read('data/roomstate_sync.ini')
+        RoomStateSync['playeronline'] = {}
         RoomStateSync['comptime'] = {}
+        RoomStateSync['companswer'] = {}
+        RoomStateSync['compnum'] = {}
         
         # Setup the Find My Friends RoomState key for each player
         database = sqlite3.connect('data/bezerk.db')
         dbcursor = database.cursor()
         dbcursor.execute('SELECT * FROM accounts')
         for player in dbcursor:
-            RoomState['playeronline'][player[0]] = '0'
+            RoomStateSync['playeronline'][player[0]] = '0'
+        with open('data/roomstate_sync.ini', 'w') as rssync:
+            RoomStateSync.write(rssync)
         
         # Setup the RoomState keys for each room
         dbcursor.execute('SELECT * FROM rooms')
@@ -75,12 +79,14 @@ class IRCClient():
                 # (This is here because my IRC server has PING in one of its first messages, despite it not being an actual PING.)
                 if chjoin == 0:
                     IRCLog.info('Joining channels...')
+                    chjoinmsg = ''
                     IRCSock.send('JOIN #Acro_List\n'.encode())
                     database = sqlite3.connect('data/bezerk.db')
                     dbcursor = database.cursor()
                     dbcursor.execute('SELECT ChannelName FROM rooms')
                     for room2join in dbcursor:
-                        IRCSock.send('JOIN #{}\n'.format(room2join[0]).encode())
+                        chjoinmsg = chjoinmsg + 'JOIN #{}\n'.format(room2join[0])
+                    IRCSock.send('{}'.format(chjoinmsg).encode())
                     dbcursor.close()
                     database.close()
                     chjoin = 1
@@ -109,8 +115,10 @@ class IRCClient():
                     RoomState['playerloc'][LogonIRCName] = LogonChannel[1:]
                     RoomState['playername'][LogonIRCName] = LogonMessage[1]
                     RoomState['playerfmf'][LogonMessage[1]] = LogonIRCName
-                    RoomState['playeronline'][LogonMessage[1]] = '1'
                     RoomState['playerinroom'][LogonIRCName] = '0'
+                    RoomStateSync['playeronline'][LogonMessage[1]] = '1'
+                    with open('data/roomstate_sync.ini', 'w') as rssync:
+                        RoomStateSync.write(rssync)
                     # Check if the player is in the room list channel. If they aren't, send sponsor_ad to them privately.
                     if LogonChannel != '#Acro_List':
                         IRCLog.info('Username ' + LogonMessage[1] + ' logged on to the ' + LogonChannel + ' room')
@@ -128,12 +136,14 @@ class IRCClient():
                         dbcursor = database.cursor()
                         IRCSock.send('PRIVMSG {} :start_list bot\r\n'.format(LogonIRCName).encode())
                         dbcursor.execute('SELECT * FROM rooms')
+                        RoomJoinMsg = ''
                         for room in dbcursor:
                             # TBD: properly add the high score counter
                             RoomPlayerCount = int(RoomState[room[1]]['roomplayercount'])
                             RoomHighScore = int(RoomState[room[1]]['roomhighscore'])
                             RoomMode = RoomState[room[1]]['roommode']
-                            IRCSock.send(f'PRIVMSG {LogonIRCName} :list_item bot 0 "{room[0]}" 0 "{IRCLocation}" {IRCPort} 0 "{room[1]}" 0 "Acrobot" {room[2]} "{RoomMode}" {str(RoomPlayerCount)} {str(RoomHighScore)} 0 {room[3]}\r\n'.encode())
+                            RoomJoinMsg = RoomJoinMsg + f'PRIVMSG {LogonIRCName} :list_item bot 0 "{room[0]}" 0 "{IRCLocation}" {IRCPort} 0 "{room[1]}" 0 "Acrobot" {room[2]} "{RoomMode}" {str(RoomPlayerCount)} {str(RoomHighScore)} 0 {room[3]}\r\n'
+                        IRCSock.send('{}'.format(RoomJoinMsg).encode())
                         dbcursor.close()
                         database.close()
                         IRCSock.send('PRIVMSG {} :end_list bot\r\n'.format(LogonIRCName).encode())
@@ -228,8 +238,8 @@ class IRCClient():
                     logoffinfo.pop(LogoffIndex)
                     logoffinfo = '/'.join(logoffinfo)
                     RoomState[LogoffChannel]['roomplayercount'] = str(int(RoomState[LogoffChannel]['roomplayercount']) - 1)
-                    RoomState['playeronline'][LogoffUsername] = '0'
                     RoomState['playerinroom'][LogoffIRCName] = '0'
+                    RoomStateSync['playeronline'][LogoffUsername] = '0'
                     # Update the in-game player list.
                     IRCSock.send('PRIVMSG #{} :player remove "{}" {} "{}"\r\n'.format(LogoffChannel, LogoffIRCName, LogoffScore, LogoffUsername).encode())
                     # Check if the room's game type needs to be changed.
@@ -260,7 +270,7 @@ class IRCClient():
                     IRCSock.send('PRIVMSG {} :player_not_found "{}"\r\n'.format(FMFIRCName, FMFUsername).encode())
                 else:
                     # Otherwise, check if the requested player is online.
-                    if RoomState['playeronline'][FMFUsername] == '0' or dbresults is None:
+                    if RoomStateSync['playeronline'][FMFUsername] == '0' or dbresults is None:
                         dbcursor.close()
                         database.close()
                         # If they aren't, send player_not_found.
@@ -320,9 +330,14 @@ class IRCClient():
                     RoomStateSync.write(rssync)
                 IRCSock.send('PRIVMSG #{} :answer_received {}\r\n'.format(rsch, RoomStateSync[rsch]['companswercount']).encode())
             
-            # TBD: voting responses
+            # When a vote is sent during the voting round.
             elif msg.find('response vote'.encode()) != -1:
+                # examples below
+                # :ip3232249858!UnknownUse@90.192.224.189 PRIVMSG Acrobot :response vote ip1234567890 1
+                # :ip3232249858!UnknownUse@90.192.224.189 PRIVMSG Acrobot :response vote ip1234567891 1
+                # :ip3232249858!UnknownUse@90.192.224.189 PRIVMSG Acrobot :response vote ip1234567890 1
                 # NOTE: if there's two ' next to each other, that's a ". change it to that.
+                # NOTE 2: VOTES CAN BE CHANGED!!!
                 print('voting round TBD')
             
             # When a category is selected by the winning player.
@@ -342,12 +357,15 @@ class IRCClient():
             # TBD: figure out how to kick people out with enough complaints - it can't just be a certain amount, it could be abused
             elif msg.find('complain'.encode()) != -1:
                 ComplainPlayer = msg.decode('UTF-8')
+                ComplainReason = ComplainPlayer.split(':complain ')
                 ComplainPlayer = ComplainPlayer.split('"')
                 ComplainType = ComplainPlayer[0].split(' ')
-                ComplainReason = ComplainPlayer[3]
                 ComplainPlayer = ComplainPlayer[1]
                 ComplainIRCName = ComplainType[0].split('!')
                 ComplainType = int(ComplainType[5])
+                ComplainReason = ComplainReason[1].split('{} "{}" '.format(str(ComplainType), ComplainPlayer))
+                ComplainReason = ComplainReason[1].split('\r\n')
+                ComplainReason = ComplainReason[0][:-1]
                 ComplainIRCName = ComplainIRCName[0].split(':')
                 ComplainIRCName = ComplainIRCName[1]
                 ComplainTime = time.time()
@@ -363,7 +381,7 @@ class IRCClient():
                 ComplainFile = open('data/report-' + ComplainTime + '.txt', 'w')
                 ComplainFile.write(ComplainReport)
                 ComplainFile.close()
-                IRCSock.send('PRIVMSG {} :chat "Thank you! Your complaint has been sent.\r\n"'.format(ComplainIRCName).encode())
+                IRCSock.send('PRIVMSG {} :chat "Thank you! Your complaint has been sent."\r\n'.format(ComplainIRCName).encode())
 
 class GameLoop():
     def practice(IRCSock, RoomStateSync, GLChannel):
@@ -426,7 +444,16 @@ class GameLoop():
             IRCSock.send('PRIVMSG #{} :start_comp_round 2500 60000 {} "{}" "{}"\r\n'.format(GLChannel, str(AcroRound), Acrophobia.generateacro(AcroLetters), AcroCategory).encode())
             PlayLoop = GameLoop.loopcheck(GLChannel, 1, RoomStateSync)
             time.sleep(78)
-            # hi again, make sure that someone actually submitted an acro before continuing
+            if int(RoomStateSync[GLChannel]['companswercount']) > 0:
+                # TBD: i'm guessing that the amount of voting time you get depends on how many answers were submitted
+                AcroVotingTime = 45
+                IRCSock.send('PRIVMSG #{} :start_voting_round 2500 {}000 {}\r\n'.format(GLChannel, str(AcroVotingTime), AcroRound).encode())
+                IRCSock.send('PRIVMSG #{} :start_list answer 3 1\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :list_item answer 0 "ip3232249858" "answer 1"\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :list_item answer 1 "ip1234567890" "answer 2"\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :list_item answer 2 "ip1234567891" "answer 3"\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :end_list answer\r\n'.format(GLChannel).encode())
+                time.sleep(100)
     
     def loopcheck(channel, isplaymode, RoomStateSync):
         if isplaymode == 0:

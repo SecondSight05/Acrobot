@@ -128,6 +128,7 @@ class greenroom():
                         if RegisterUsername.find(name[:-1]) != -1:
                             RegisterBadName = 1
                 if RegisterBadName == 1:
+                    #8 isn't a valid code for old clients on reg!!!!
                     RegisterCode = 8
                 else:
                     # Set the value for if the player is over 18. (Adult Language rooms)
@@ -151,23 +152,13 @@ class greenroom():
                         RegisterPassword = ''
                         GRLog.info('New username ' + RegisterUsername + ' failed to register - Username in use')
                     else:
-                        # Connect to the IRC server and send the message that a new username has been created.
-                        # Used to add the username into RoomState without restarting Acrobot.
-                        NPLink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        NPLink.connect((ConfigFile['bezerk']['IRCServerLocation'], int(ConfigFile['bezerk']['IRCServerPort'])))
-                        NPLink.send('USER NPLink NPLink NPLink :NPLink\n'.encode())
-                        NPLink.send('NICK NPLink\n'.encode())
-                        NPLink.send('PRIVMSG nickserv :NPLink\r\n'.encode())
-                        NPConn = True
-                        while NPConn:
-                            npmessage = NPLink.recv(2048)
-                            if npmessage.find('PING'.encode()) != -1:
-                                NPLink.send('PONG :pong\r\n'.encode())
-                                NPLink.send('PRIVMSG Acrobot :newreg {}\r\n'.format(RegisterUsername).encode())
-                            elif npmessage.find('npdone'.encode()) != -1:
-                                NPConn = False
-                        NPLink.shutdown(socket.SHUT_RDWR)
-                        NPLink.close()
+                        # Add the username into RoomStateSync.
+                        RoomStateSync = ConfigParser()
+                        RoomStateSync.read('data/roomstate_sync.ini')
+                        RoomStateSync['playeronline'][RegisterUsername] = '0'
+                        with open('data/roomstate_sync.ini', 'w') as rssync:
+                            RoomStateSync.write(rssync)
+                        RoomStateSync = ''
                         RegisterCode = 0
                         # Add the account to the database.
                         dbcursor.execute('INSERT INTO accounts VALUES (?, ?, ?, ?, ?)', (RegisterUsername, RegisterPassword, RegisterAdult, 0, 0))
