@@ -25,6 +25,7 @@ class IRCClient():
         RoomStateSync['comptime'] = {}
         RoomStateSync['companswer'] = {}
         RoomStateSync['compnum'] = {}
+        RoomStateSync['votedfor'] = {}
         
         # Setup the Find My Friends RoomState key for each player
         database = sqlite3.connect('data/bezerk.db')
@@ -49,6 +50,8 @@ class IRCClient():
             RoomStateSync[room[1]]['companswers'] = ''
             RoomStateSync[room[1]]['category'] = ''
             RoomStateSync[room[1]]['roomcurrentstate'] = 'start_game'
+            RoomStateSync[room[1]]['voterlist'] = ''
+            RoomStateSync[room[1]]['speedwinner'] = ''
         dbcursor.close()
         database.close()
         
@@ -100,14 +103,17 @@ class IRCClient():
                     JoinIRCName = JoinMessage[1].split('!')
                     JoinIRCName = JoinIRCName[0]
                     JoinChannel = JoinMessage[2][:-2]
+                    RoomState['playerloc'][JoinIRCName] = JoinChannel
                     IRCSock.send('PRIVMSG {} :logon_now\r\n'.format(JoinIRCName).encode())
             
             # Logon Processing
             elif msg.find('logon'.encode()) != -1:
                 LogonMessage = msg.decode('UTF-8')
                 LogonMessage = LogonMessage.split('"')
-                LogonIRCName = JoinIRCName
-                LogonChannel = JoinChannel
+                LogonIRCName = LogonMessage[0].split('!')
+                LogonIRCName = LogonIRCName[0].split(':')
+                LogonIRCName = LogonIRCName[1]
+                LogonChannel = RoomState['playerloc'][LogonIRCName]
                 LogonResult = Acrophobia.logon(LogonMessage[1], LogonMessage[3], encryption)
                 # If the logon was successful, then send logon_accepted to them privately.
                 if LogonResult == 1:
@@ -210,10 +216,6 @@ class IRCClient():
                             RoomStateSync.write(rssync)
                         IRCSock.send('PRIVMSG #{} :chat "A third player has joined - Get ready to play!"\r\n'.format(StartPlayChannel).encode())
                         threading.Thread(target=GameLoop.play, args=(IRCSock, RoomStateSync, StartPlayChannel)).start()
-                # Update the room in the list to show a new player.
-                IRCSock.send('PRIVMSG #Acro_List :start_list bot\r\n'.encode())
-                IRCSock.send(f'PRIVMSG #Acro_List :list_item bot 0 "{dbresults[0]}" 0 "{IRCLocation}" {IRCPort} 0 "{dbresults[1]}" 0 "Acrobot" {dbresults[2]} "{RoomMode}" {str(RoomPlayerCount)} {str(RoomHighScore)} 0 {dbresults[3]}\r\n'.encode())
-                IRCSock.send('PRIVMSG #Acro_List :end_list bot\r\n'.encode())
             
             # Logoff - Remove player from room.
             elif msg.find('logoff ip'.encode()) != -1 or msg.find('QUIT'.encode()) != -1:
@@ -305,15 +307,6 @@ class IRCClient():
                             FMFRoomList = '0'
                         IRCSock.send(f'PRIVMSG {FMFIRCName} :player_found "{FMFUsername}" "{fmfroomname}" 0 "{IRCLocation}" {IRCPort} 0 "{FMFChannel}" 0 "Acrobot" {fmfisclean} "{RoomMode}" {RoomPlayerCount} {RoomHighScore} {FMFRoomList}\r\n'.encode())
             
-            # When someone registers a new account, add the fact that they're not online yet to RoomState.
-            elif msg.find('newreg'.encode()) != -1:
-                newreg = msg.decode('UTF-8')
-                newreg = newreg.split(' ')
-                newreg = newreg[4].split('\r\n')
-                newreg = newreg[0]
-                RoomState['playeronline'][newreg] = '0'
-                IRCSock.send('PRIVMSG NPLink :npdone\r\n'.encode())
-            
             # When an acro is sent during the composition round.
             elif msg.find('response answer'.encode()) != -1:
                 RAAcro = msg.decode('UTF-8')
@@ -323,9 +316,16 @@ class IRCClient():
                 RAPlayer = RATime[6]
                 RATime = RATime[5]
                 rsch = RoomState['playerloc'][RAPlayer]
-                RoomStateSync[rsch]['companswers'] = RoomStateSync[rsch]['companswers'] + '/' + RoomStateSync[rsch]['companswercount'] + ',' + RAPlayer + ',' + RAAcro
+                RoomStateSync[rsch]['companswers'] = RoomStateSync[rsch]['companswers'] + ',' + RAPlayer
                 RoomStateSync[rsch]['companswercount'] = str(int(RoomStateSync[rsch]['companswercount']) + 1)
                 RoomStateSync['comptime'][RAPlayer] = str(RATime)
+                RoomStateSync['companswer'][RAPlayer] = RAAcro
+                RoomStateSync['compnum'][RAPlayer] = RoomStateSync[rsch]['companswercount']
+                RoomStateSync['votedfor'][RAPlayer] = ''
+                # If this is the first acro submitted, then set the player to win the speed bonus.
+                # Uh... maybe change this later? Comptime was already a thing...
+                if RoomStateSync[rsch]['speedwinner'] == '':
+                    RoomStateSync[rsch]['speedwinner'] = RAPlayer
                 with open('data/roomstate_sync.ini', 'w') as rssync:
                     RoomStateSync.write(rssync)
                 IRCSock.send('PRIVMSG #{} :answer_received {}\r\n'.format(rsch, RoomStateSync[rsch]['companswercount']).encode())
@@ -338,7 +338,21 @@ class IRCClient():
                 # :ip3232249858!UnknownUse@90.192.224.189 PRIVMSG Acrobot :response vote ip1234567890 1
                 # NOTE: if there's two ' next to each other, that's a ". change it to that.
                 # NOTE 2: VOTES CAN BE CHANGED!!!
-                print('voting round TBD')
+                RVVoted = msg.decode('UTF-8')
+                RVVoted = RVVoted.split(' ')
+                RVPlayer = RVVoted[0].split('!')
+                RVPlayer = RVPlayer[0].split(':')
+                RVPlayer = RVPlayer[1]
+                RVVoted = RVVoted[5]
+                print('RVPLAYER: ' + RVPlayer)
+                print('RVVOTED: ' + RVVoted)
+                RoomStateSync['votedfor'][RVPlayer] = RVVoted
+                # If the player hasn't voted yet on this round, add them to the voterlist.
+                vtrlistchk = RoomStateSync[RoomState['playerloc'][RVPlayer]]['voterlist'].split(',')
+                if RVPlayer not in vtrlistchk:
+                    RoomStateSync[RoomState['playerloc'][RVPlayer]]['voterlist'] = RoomStateSync[RoomState['playerloc'][RVPlayer]]['voterlist'] + ',' + RVPlayer
+                with open('data/roomstate_sync.ini', 'w') as rssync:
+                    RoomStateSync.write(rssync)
             
             # When a category is selected by the winning player.
             elif msg.find('response category'.encode()) != -1:
@@ -389,47 +403,51 @@ class GameLoop():
         AcroCategory = 'General Acrophobia'
         PracticeLoop = True
         PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
-        time.sleep(4)
-        while PracticeLoop is True:
+        #time.sleep(4)
+        #while PracticeLoop is True:
             # Composition Round (Practice)
-            IRCSock.send('PRIVMSG #{} :start_comp_round 2500 60000 1 "{}" "{}"\r\n'.format(GLChannel, Acrophobia.generateacro(AcroLetters), AcroCategory).encode())
-            PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
-            time.sleep(78)
+            #if PracticeLoop == True:
+                #IRCSock.send('PRIVMSG #{} :start_comp_round 2500 60000 1 "{}" "{}"\r\n'.format(GLChannel, Acrophobia.generateacro(AcroLetters), AcroCategory).encode())
+            #PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
+            #time.sleep(78)
             # If there wasn't any composition round submissions, skip the category picker round.
-            if int(RoomStateSync[GLChannel]['companswercount']) > 0:
+            #if int(RoomStateSync[GLChannel]['companswercount']) > 0 and PracticeLoop == True:
                 # In Practice Mode, the first person to submit an acro chooses the category.
-                CategoryChooser = RoomStateSync[GLChannel]['companswers'].split(',')
-                CategoryChooser = CategoryChooser[1]
+                #CategoryChooser = RoomStateSync[GLChannel]['companswers'].split(',')
+                #CategoryChooser = CategoryChooser[1]
                 # Category Picker Round (Practice)
-                IRCSock.send('PRIVMSG #{} :start_categories 2500 5000 1 "{}"\r\n'.format(GLChannel, CategoryChooser).encode())
-                PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
+                #if PracticeLoop == True:
+                    #IRCSock.send('PRIVMSG #{} :start_categories 2500 5000 1 "{}"\r\n'.format(GLChannel, CategoryChooser).encode())
+                #PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
                 # Get the categories and show them to the player.
-                CategoryList = Acrophobia.getcategories()
-                IRCSock.send('PRIVMSG #{} :start_list category\r\n'.format(GLChannel).encode())
-                IRCSock.send('PRIVMSG #{} :list_item category 0 "{}"\r\n'.format(GLChannel, CategoryList[0]).encode())
-                IRCSock.send('PRIVMSG #{} :list_item category 1 "{}"\r\n'.format(GLChannel, CategoryList[1]).encode())
-                IRCSock.send('PRIVMSG #{} :list_item category 2 "{}"\r\n'.format(GLChannel, CategoryList[2]).encode())
-                IRCSock.send('PRIVMSG #{} :list_item category 3 "General Acrophobia"\r\n'.format(GLChannel).encode())
-                IRCSock.send('PRIVMSG #{} :end_list category\r\n'.format(GLChannel).encode())
-                PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
-                time.sleep(10)
+                #CategoryList = Acrophobia.getcategories()
+                #if PracticeLoop == True:
+                    #IRCSock.send('PRIVMSG #{} :start_list category\r\n'.format(GLChannel).encode())
+                    #IRCSock.send('PRIVMSG #{} :list_item category 0 "{}"\r\n'.format(GLChannel, CategoryList[0]).encode())
+                    #IRCSock.send('PRIVMSG #{} :list_item category 1 "{}"\r\n'.format(GLChannel, CategoryList[1]).encode())
+                    #IRCSock.send('PRIVMSG #{} :list_item category 2 "{}"\r\n'.format(GLChannel, CategoryList[2]).encode())
+                    #IRCSock.send('PRIVMSG #{} :list_item category 3 "General Acrophobia"\r\n'.format(GLChannel).encode())
+                    #IRCSock.send('PRIVMSG #{} :end_list category\r\n'.format(GLChannel).encode())
+                #PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
+                #time.sleep(10)
                 # If the bottom category or no category is chosen, set the next category to General Acrophobia.
-                if RoomStateSync[GLChannel]['category'] == '' or RoomStateSync[GLChannel]['category'] == '3':
-                    AcroCategory = 'General Acrophobia'
+                #if RoomStateSync[GLChannel]['category'] == '' or RoomStateSync[GLChannel]['category'] == '3':
+                    #AcroCategory = 'General Acrophobia'
                 # Otherwise, set the category to the one that was chosen.
-                else:
-                    AcroCategory = CategoryList[int(RoomStateSync[GLChannel]['category'])]
+                #else:
+                    #AcroCategory = CategoryList[int(RoomStateSync[GLChannel]['category'])]
             # Increase the amount of letters in the next acronym by one. If it's over 7, set it back to 3.
-            AcroLetters += 1
-            if AcroLetters > 7:
-                AcroLetters = 3
+            #AcroLetters += 1
+            #if AcroLetters > 7:
+                #AcroLetters = 3
             # Empty out the composition round answers.
-            RoomStateSync[GLChannel]['companswers'] = ''
-            RoomStateSync[GLChannel]['companswercount'] = '0'
-            RoomStateSync[GLChannel]['category'] = ''
-            with open('data/roomstate_sync.ini', 'w') as rssync:
-                RoomStateSync.write(rssync)
-            PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
+            #if PracticeLoop == True:
+                #RoomStateSync[GLChannel]['companswers'] = ''
+                #RoomStateSync[GLChannel]['companswercount'] = '0'
+                #RoomStateSync[GLChannel]['category'] = ''
+            #with open('data/roomstate_sync.ini', 'w') as rssync:
+                #RoomStateSync.write(rssync)
+            #PracticeLoop = GameLoop.loopcheck(GLChannel, 0, RoomStateSync)
     
     def play(IRCSock, RoomStateSync, GLChannel):
         AcroLetters = 3
@@ -438,22 +456,106 @@ class GameLoop():
         PlayLoop = True
         PlayLoop = GameLoop.loopcheck(GLChannel, 1, RoomStateSync)
         IRCSock.send('PRIVMSG #{} :start_game 8250\r\n'.format(GLChannel).encode())
-        time.sleep(10)
+        time.sleep(15)
         while PlayLoop is True:
             # Composition Round
             IRCSock.send('PRIVMSG #{} :start_comp_round 2500 60000 {} "{}" "{}"\r\n'.format(GLChannel, str(AcroRound), Acrophobia.generateacro(AcroLetters), AcroCategory).encode())
             PlayLoop = GameLoop.loopcheck(GLChannel, 1, RoomStateSync)
             time.sleep(78)
-            if int(RoomStateSync[GLChannel]['companswercount']) > 0:
-                # TBD: i'm guessing that the amount of voting time you get depends on how many answers were submitted
-                AcroVotingTime = 45
+            if int(RoomStateSync[GLChannel]['companswercount']) > 0 and PlayLoop == True:
+                AcroVotingTime = Acrophobia.givevotingtime(RoomStateSync[GLChannel]['companswercount'])
+                AcroAnswers = RoomStateSync[GLChannel]['companswers'].split(',')
                 IRCSock.send('PRIVMSG #{} :start_voting_round 2500 {}000 {}\r\n'.format(GLChannel, str(AcroVotingTime), AcroRound).encode())
-                IRCSock.send('PRIVMSG #{} :start_list answer 3 1\r\n'.format(GLChannel).encode())
-                IRCSock.send('PRIVMSG #{} :list_item answer 0 "ip3232249858" "answer 1"\r\n'.format(GLChannel).encode())
-                IRCSock.send('PRIVMSG #{} :list_item answer 1 "ip1234567890" "answer 2"\r\n'.format(GLChannel).encode())
-                IRCSock.send('PRIVMSG #{} :list_item answer 2 "ip1234567891" "answer 3"\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :start_list answer {} 1\r\n'.format(GLChannel, RoomStateSync[GLChannel]['companswercount']).encode())
+                complistcount = 1
+                while complistcount < int(RoomStateSync[GLChannel]['companswercount']) + 1:
+                    IRCSock.send('PRIVMSG #{} :list_item answer {} "{}" "{}"\r\n'.format(GLChannel, str(complistcount - 1), AcroAnswers[complistcount], RoomStateSync['companswer'][AcroAnswers[complistcount]]).encode())
+                    complistcount += 1
                 IRCSock.send('PRIVMSG #{} :end_list answer\r\n'.format(GLChannel).encode())
-                time.sleep(100)
+                time.sleep(AcroVotingTime + 15)
+                print('Doing Winner Calculation Now')
+                AcroRoundWinner, AcroRoundVotes = Acrophobia.calcvotewinner(RoomStateSync, GLChannel, AcroAnswers)
+                print('Vote Reveal Starting Now')
+                IRCSock.send('PRIVMSG #{} :start_list vote_count\r\n'.format(GLChannel).encode())
+                roundendcount = 1
+                while roundendcount < int(RoomStateSync[GLChannel]['companswercount']) + 1:
+                    #ADD AFTER SESSION:
+                    #1. check if the player voted or not
+                    #2. voters bonus points
+                    # If the player didn't vote, then they lose all points gained during this round.
+                    notlosingvotes = 1
+                    if RoomStateSync['votedfor'][AcroAnswers[roundendcount]] == '':
+                        notlosingvotes = 0
+                    # If the player voted for the winner, then they get a Voters Bonus Point.
+                    votersbp = 0
+                    if RoomStateSync['votedfor'][AcroAnswers[roundendcount]] == AcroRoundWinner:
+                        votersbp = 1
+                    IRCSock.send('PRIVMSG #{} :list_item vote_count {} "{}" {} {} {}\r\n'.format(GLChannel, str(roundendcount - 1), AcroAnswers[roundendcount], AcroRoundVotes[roundendcount], notlosingvotes, votersbp).encode())
+                    roundendcount += 1
+                IRCSock.send('PRIVMSG #{} :end_list vote_count\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :start_list voted_for\r\n'.format(GLChannel).encode())
+                roundendcount = 1
+                while roundendcount < int(RoomStateSync[GLChannel]['companswercount']) + 1:
+                    #ADD AFTER SESSION:
+                    #prevent traceback if a player doesn't vote
+                    #MIGHT BE FIXED. the autoplay bots don't like me right now.
+                    IRCSock.send('PRIVMSG #{} :list_item voted_for 1 "{}" "{}"\r\n'.format(GLChannel, AcroAnswers[roundendcount], RoomStateSync['votedfor'][AcroAnswers[roundendcount]]).encode())
+                    roundendcount += 1
+                IRCSock.send('PRIVMSG #{} :end_list voted_for\r\n'.format(GLChannel).encode())
+                #ADD SCORE KEEPING AFTER SESSION
+                #IRCSock.send('PRIVMSG #{} :start_list score\r\n'.format(GLChannel).encode())
+                #roundendcount = 1
+                if RoomStateSync[GLChannel]['speedwinner'] != '':
+                    AcroSpeedWinner = RoomStateSync[GLChannel]['speedwinner']
+                IRCSock.send('PRIVMSG #{} :start_scores 1 "{}" {} "{}" 2\r\n'.format(GLChannel, AcroRoundWinner, str(AcroLetters), AcroSpeedWinner).encode())
+                time.sleep(45)
+                IRCSock.send('PRIVMSG #{} :start_categories 2500 5000 1 "{}"\r\n'.format(GLChannel, AcroRoundWinner).encode())
+                CategoryList = Acrophobia.getcategories()
+                IRCSock.send('PRIVMSG #{} :start_list category\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :list_item category 0 "{}"\r\n'.format(GLChannel, CategoryList[0]).encode())
+                IRCSock.send('PRIVMSG #{} :list_item category 1 "{}"\r\n'.format(GLChannel, CategoryList[1]).encode())
+                IRCSock.send('PRIVMSG #{} :list_item category 2 "{}"\r\n'.format(GLChannel, CategoryList[2]).encode())
+                IRCSock.send('PRIVMSG #{} :list_item category 3 "General Acrophobia"\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :end_list category\r\n'.format(GLChannel).encode())
+                time.sleep(10)
+                # If the bottom category or no category is chosen, set the next category to General Acrophobia.
+                if RoomStateSync[GLChannel]['category'] == '' or RoomStateSync[GLChannel]['category'] == '3':
+                    AcroCategory = 'General Acrophobia'
+                # Otherwise, set the category to the one that was chosen.
+                else:
+                    AcroCategory = CategoryList[int(RoomStateSync[GLChannel]['category'])]
+            AcroLetters += 1
+            if AcroLetters > 7:
+                AcroLetters = 3
+            AcroRound += 1
+            RoomStateSync[GLChannel]['companswers'] = ''
+            RoomStateSync[GLChannel]['companswercount'] = '0'
+            RoomStateSync[GLChannel]['category'] = ''
+            RoomStateSync[GLChannel]['speedwinner'] = ''
+            with open('data/roomstate_sync.ini', 'w') as rssync:
+                RoomStateSync.write(rssync)
+            # Every 3 rounds (or before the face-off), have an interstitial break.
+            RunAdBreak = 0
+            if AcroRound % 3 == 0:
+                RunAdBreak = 1
+            #ADD CHECK IF RIGHT BEFORE FACEOFF HERE LATER
+            if RunAdBreak == 1:
+                InterstitialList = Acrophobia.getinterstitials()
+                IRCSock.send('PRIVMSG #{} :start_list download_ad\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :list_item download_ad 1 {}\r\n'.format(GLChannel, InterstitialList[0]).encode())
+                time.sleep(0.2)
+                IRCSock.send('PRIVMSG #{} :list_item download_ad 2 {}\r\n'.format(GLChannel, InterstitialList[1]).encode())
+                time.sleep(0.2)
+                IRCSock.send('PRIVMSG #{} :list_item download_ad 3 {}\r\n'.format(GLChannel, InterstitialList[2]).encode())
+                time.sleep(0.2)
+                IRCSock.send('PRIVMSG #{} :end_list download_ad\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :start_ad 2500 20000 1\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :start_list play_ad\r\n'.format(GLChannel).encode())
+                IRCSock.send('PRIVMSG #{} :list_item play_ad 1 {}\r\n'.format(GLChannel, InterstitialList[0]).encode())
+                IRCSock.send('PRIVMSG #{} :list_item play_ad 2 {}\r\n'.format(GLChannel, InterstitialList[1]).encode())
+                IRCSock.send('PRIVMSG #{} :list_item play_ad 3 {}\r\n'.format(GLChannel, InterstitialList[2]).encode())
+                IRCSock.send('PRIVMSG #{} :end_list play_ad\r\n'.format(GLChannel).encode())
+                time.sleep(45)
     
     def loopcheck(channel, isplaymode, RoomStateSync):
         if isplaymode == 0:
@@ -534,3 +636,65 @@ class Acrophobia():
         database.close()
         CategoryList = [dbresults[0][0], dbresults[1][0], dbresults[2][0]]
         return CategoryList
+    
+    # Give the time for the current voting round.
+    def givevotingtime(playercount):
+        playercount = int(playercount)
+        VotingTime = 20
+        # The time increases depending on the player count, up to a maximum of 45 seconds.
+        if playercount > 4:
+            VotingTime = 5 * playercount
+        if playercount >= 9:
+            VotingTime = 45
+        return VotingTime
+    
+    def calcvotewinner(RoomStateSync, GLChannel, AcroAnswers):
+        ivlcount = 1
+        voterlist = ''
+        # Create the initial voter list.
+        print('CVW - creating initial list')
+        while ivlcount < int(RoomStateSync[GLChannel]['companswercount']) + 1:
+            voterlist = voterlist + ',0'
+            ivlcount += 1
+        print('CVW - splitting list')
+        voterlist = voterlist.split(',')
+        votecount = 1
+        votewinner = ''
+        print('CVW - starting calculations')
+        while votecount < int(RoomStateSync[GLChannel]['companswercount']) + 1:
+            nextvoter = AcroAnswers[votecount]
+            voteindex = AcroAnswers.index(RoomStateSync['votedfor'][nextvoter])
+            if voterlist[voteindex] != '':
+                highscore = int(voterlist[voteindex]) + 1
+                voterlist[voteindex] = str(highscore)
+                if votewinner == '':
+                    votewinner = AcroAnswers[voteindex]
+                    winnerindex = voteindex
+                elif highscore > int(voterlist[winnerindex]):
+                    votewinner = AcroAnswers[voteindex]
+                    winnerindex = voteindex
+            voteindex += 1
+            votecount += 1
+            print('CVW - loop')
+        return votewinner, voterlist
+    
+    # Choose three random ads to be in the ad break.
+    def getinterstitials():
+        with open('data/adlist.txt', 'r') as ads:
+            adlist = []
+            for ad in ads:
+                ad = ad.strip()
+                adlist.append(ad)
+        adchoice1 = random.choice(adlist)
+        adget = 0
+        while adget != 1:
+            adchoice2 = random.choice(adlist)
+            if adchoice2 != adchoice1:
+                adget = 1
+        adget = 0
+        while adget != 1:
+            adchoice3 = random.choice(adlist)
+            if adchoice3 != adchoice1 and adchoice3 != adchoice2:
+                adget = 1
+        adreturn = [adchoice1, adchoice2, adchoice3]
+        return adreturn
