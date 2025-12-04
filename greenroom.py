@@ -153,12 +153,13 @@ class greenroom():
                         GRLog.info('New username ' + RegisterUsername + ' failed to register - Username in use')
                     else:
                         # Add the username into RoomStateSync.
-                        RoomStateSync = ConfigParser()
-                        RoomStateSync.read('data/roomstate_sync.ini')
-                        RoomStateSync['playeronline'][RegisterUsername] = '0'
-                        with open('data/roomstate_sync.ini', 'w') as rssync:
-                            RoomStateSync.write(rssync)
-                        RoomStateSync = ''
+                        #CONVERSION TO DB - REMOVE WHEN DONE
+                        #RoomStateSync = ConfigParser()
+                        #RoomStateSync.read('data/roomstate_sync.ini')
+                        #RoomStateSync['playeronline'][RegisterUsername] = '0'
+                        #with open('data/roomstate_sync.ini', 'w') as rssync:
+                            #RoomStateSync.write(rssync)
+                        #RoomStateSync = ''
                         RegisterCode = 0
                         # Add the account to the database.
                         dbcursor.execute('INSERT INTO accounts VALUES (?, ?, ?, ?, ?)', (RegisterUsername, RegisterPassword, RegisterAdult, 0, 0))
