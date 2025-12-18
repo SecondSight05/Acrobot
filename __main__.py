@@ -44,7 +44,7 @@ if os.path.isfile('data/config.ini') == False:
     ConfigFile['bezerk']['IRCServerLocation'] = '127.0.0.1'
     ConfigFile['bezerk']['IRCServerPort'] = '6667'
     ConfigFile['bezerk']['WebServerLocation'] = '127.0.0.1'
-    ConfigFile['bezerk']['WebServerPort'] = '80'
+    ConfigFile['bezerk']['WebServerPort'] = '85'
     ConfigFile['bezerk']['FernetKey'] = Fernet.generate_key().decode('UTF-8')
     with open('data/config.ini', 'w') as newconfig:
         ConfigFile.write(newconfig)
@@ -74,4 +74,5 @@ if os.path.isfile('data/roomstate_sync.ini') == True:
 # Connect to specified IRC server
 threading.Thread(target=IRCListen.start).start()
 # Start the web server
+
 threading.Thread(target=GRListen.start).start()
