@@ -6,7 +6,7 @@ from IRCClient import IRCClient as IRCListen
 from greenroom import greenroom as GRListen
 
 print("Acrobot - The Magic 90's Word Game Reviver")
-print('Created by SecondSight')
+print('https://github.com/SecondSight05/Acrobot')
 print('')
 
 # Setup logging and log first startup message
@@ -33,6 +33,16 @@ dbcursor.execute('CREATE TABLE IF NOT EXISTS categories (Category TEXT)')
 if SetupRooms == 1:
     dbcursor.execute('INSERT INTO rooms VALUES ("Acro Central", "Acro_AcroCentral", 1, 0)')
     dbcursor.execute('INSERT INTO rooms VALUES ("Dungeon", "Acro_Dungeon", 0, 0)')
+    dbcursor.execute('INSERT INTO categories VALUES ("Television")')
+    dbcursor.execute('INSERT INTO categories VALUES ("Animals")')
+    dbcursor.execute('INSERT INTO categories VALUES ("Food + Drink")')
+    dbcursor.execute('INSERT INTO categories VALUES ("Current Events")')
+    dbcursor.execute('INSERT INTO categories VALUES ("Geography")')
+    dbcursor.execute('INSERT INTO categories VALUES ("Science")')
+    dbcursor.execute('INSERT INTO categories VALUES ("History")')
+    dbcursor.execute('INSERT INTO categories VALUES ("Celebrities")')
+    dbcursor.execute('INSERT INTO categories VALUES ("Show Biz")')
+    dbcursor.execute('INSERT INTO categories VALUES ("Sports")')
 #dbcursor.execute('INSERT INTO rooms VALUES ("After Dark", "Acro_AfterDark", 0, 0)')
 database.commit()
 dbcursor.close()
@@ -74,5 +84,4 @@ if os.path.isfile('data/roomstate_sync.ini') == True:
 # Connect to specified IRC server
 threading.Thread(target=IRCListen.start).start()
 # Start the web server
-
 threading.Thread(target=GRListen.start).start()
